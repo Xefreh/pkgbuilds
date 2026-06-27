@@ -6,10 +6,10 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-# Répertoire racine contenant les submodules de paquets.
+# Repo root containing the package submodules.
 WorkingDirectory=%h/work/github.com/Xefreh/pkgbuilds
-# Secrets Telegram lus depuis l'env (jamais committés).
+# Telegram secrets read from the env (never committed).
 EnvironmentFile=%h/.config/aur-updater.env
 ExecStart=%h/work/github.com/Xefreh/pkgbuilds/aur-updater/target/release/aur-updater
-# Échec d'une exécution ne fait pas planter l'unité système; le timer continue.
+# A failed run does not fail the unit; the timer keeps going.
 SuccessExitStatus=0
