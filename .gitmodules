@@ -1,0 +1,3 @@
+[submodule "zcode-appimage"]
+	path = zcode-appimage
+	url = https://github.com/Xefreh/zcode-appimage.git
