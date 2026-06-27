@@ -13,6 +13,6 @@ pkg/
 
 # AUR updater
 aur-updater/target/
-# secrets Telegram (jamais committés)
+# Telegram secrets (never committed)
 aur-updater/*.env
 aur-updater/**/*.env
