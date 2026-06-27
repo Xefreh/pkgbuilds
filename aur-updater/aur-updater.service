@@ -1,0 +1,15 @@
+[Unit]
+Description=AUR auto-updater (pkgver bump + push AUR + Telegram digest)
+Documentation=file://%h/work/github.com/Xefreh/pkgbuilds/aur-updater/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Répertoire racine contenant les submodules de paquets.
+WorkingDirectory=%h/work/github.com/Xefreh/pkgbuilds
+# Secrets Telegram lus depuis l'env (jamais committés).
+EnvironmentFile=%h/.config/aur-updater.env
+ExecStart=/usr/bin/python %h/work/github.com/Xefreh/pkgbuilds/aur-updater/updater.py
+# Échec d'une exécution ne fait pas planter l'unité système; le timer continue.
+SuccessExitStatus=0

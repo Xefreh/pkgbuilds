@@ -1,0 +1,24 @@
+# AUR auto-updater — manifeste des paquets
+#
+# Pour chaque paquet :
+#   path            = dossier du paquet (submodule), relatif à la racine pkgbuilds
+#   version_script  = script de détection de version (dans le dossier du paquet)
+#                     Doit sortir sur stdout UNIQUEMENT la version (ex: 3.1.8)
+#                     et exit 0 ; exit non-zero si l'upstream est cassé.
+#   version_regex   = regex validant la version détectée (protège contre un CDN
+#                     qui renverrait autre chose qu'une version).
+#   reset_pkgrel    = remettre pkgrel=1 lors d'un bump de pkgver.
+#   aur_remote       = remote SSH AUR (défaut dérivé du pkgname).
+#   push_mirror      = pousser aussi sur `origin` (ex: miroir GitHub).
+
+[telegram]
+enabled = true
+# token/chat_id fournis via l'env (TG_BOT_TOKEN / TG_CHAT_ID) par EnvironmentFile.
+
+[packages.zcode-appimage]
+path = "zcode-appimage"
+version_script = "fetch-version.sh"
+version_regex = '^\d+\.\d+\.\d+$'
+reset_pkgrel = true
+aur_remote = "ssh://aur@aur.archlinux.org/zcode-appimage.git"
+push_mirror = true

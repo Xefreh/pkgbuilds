@@ -7,3 +7,8 @@ pkg/
 # Editors / OS
 *.swp
 .DS_Store
+
+# AUR updater — secrets Telegram (jamais committés)
+aur-updater/*.env
+aur-updater/**/*.env
+aur-updater/__pycache__/

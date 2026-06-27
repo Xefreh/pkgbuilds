@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily 20:00 AUR auto-updater run
+Documentation=file://%h/work/github.com/Xefreh/pkgbuilds/aur-updater/README.md
+
+[Timer]
+# Tous les jours à 20:00. Persistent=true rattrape une exécution manquée
+# pendant un sommeil/extinction (lancée au prochain démarrage).
+OnCalendar=*-*-* 20:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
