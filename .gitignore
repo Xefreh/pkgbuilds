@@ -1,14 +1,18 @@
-# makepkg build artifacts
+.claude/
+# makepkg build artifacts (created inside each package dir)
 *.pkg.tar.*
 *.src.tar.*
 src/
 pkg/
+# ...but the Rust updater keeps its sources under aur-updater/src/
+!aur-updater/src/
 
 # Editors / OS
 *.swp
 .DS_Store
 
-# AUR updater — secrets Telegram (jamais committés)
+# AUR updater
+aur-updater/target/
+# secrets Telegram (jamais committés)
 aur-updater/*.env
 aur-updater/**/*.env
-aur-updater/__pycache__/
