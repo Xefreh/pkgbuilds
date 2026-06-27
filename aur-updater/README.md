@@ -1,87 +1,87 @@
 # AUR auto-updater
 
-Orchestrateur quotidien qui détecte les nouvelles versions upstream de chaque
-paquet AUR, met à jour `PKGBUILD` + `.SRCINFO`, pousse sur l'AUR, et envoie un
-récapitulatif Telegram (mis à jour / déjà à jour / upstream cassé / échec).
+A daily orchestrator that detects new upstream versions for each AUR package,
+updates the `PKGBUILD` + `.SRCINFO`, pushes to the AUR, and sends a Telegram
+summary (updated / already up to date / broken upstream / failed).
 
 ## Stack
-- Rust (edition 2024) — binaire `aur-updater` : orchestrateur et parsing PKGBUILD
-- Scripts bash par paquet pour la détection de version (ex: `fetch-version.sh`)
-- systemd timer — déclenchement quotidien à 20:00
-- TOML — manifeste de configuration
+- Rust (edition 2024) — `aur-updater` binary: orchestrator and PKGBUILD parsing
+- Per-package bash scripts for version detection (e.g. `fetch-version.sh`)
+- systemd timer — daily trigger at 20:00
+- TOML — configuration manifest
 
-Outils système requis à l'exécution : `git`, `makepkg` (base-devel), `curl`
-(envoi Telegram) et, de préférence, `updpkgsums` (pacman-contrib).
+System tools required at runtime: `git`, `makepkg` (base-devel), `curl`
+(Telegram send) and, preferably, `updpkgsums` (pacman-contrib).
 
 ## Layout
 
 ```
 pkgbuilds/
 ├── aur-updater/
-│   ├── Cargo.toml            # manifeste Rust (edition 2024)
+│   ├── Cargo.toml            # Rust manifest (edition 2024)
 │   ├── Cargo.lock
 │   ├── src/
-│   │   ├── main.rs           # orchestrateur (CLI: --dry-run, --only <pkg>)
-│   │   ├── pkgbuild.rs       # lecture/édition pkgver, pkgrel
-│   │   └── notify.rs         # notification Telegram (digest unique)
-│   ├── config.toml           # manifeste des paquets
-│   ├── aur-updater.service   # unit oneshot (User, EnvironmentFile)
+│   │   ├── main.rs           # orchestrator (CLI: --dry-run, --only <pkg>)
+│   │   ├── pkgbuild.rs       # read/edit pkgver, pkgrel
+│   │   └── notify.rs         # Telegram notification (single digest)
+│   ├── config.toml           # package manifest
+│   ├── aur-updater.service   # oneshot unit (User, EnvironmentFile)
 │   ├── aur-updater.timer     # OnCalendar 20:00
-│   ├── aur-updater.env.example # template secrets Telegram
+│   ├── aur-updater.env.example # Telegram secrets template
 │   └── README.md
-└── <pkg>/                    # chaque paquet (submodule)
+└── <pkg>/                    # each package (submodule)
     ├── PKGBUILD
     ├── .SRCINFO
-    └── fetch-version.sh      # script de détection (sort la version sur stdout)
+    └── fetch-version.sh      # detection script (outputs the version on stdout)
 ```
 
-## Contrat du script de version (`fetch-version.sh`)
+## Version script contract (`fetch-version.sh`)
 
-- Sortir **sur stdout uniquement la version** (ex: `3.1.8`).
-- `exit 0` si OK ; `exit` non-zero si l'upstream est cassé (CDN modifié, etc.).
-- L'utilisateur est libre d'écrire le probing comme il veut (curl, gallop
-  search, parsing de page, API JSON…).
+- Output **only the version on stdout** (e.g. `3.1.8`).
+- `exit 0` on success; non-zero `exit` if the upstream is broken (changed CDN, etc.).
+- The user is free to implement the probing however they like (curl, gallop
+  search, page parsing, JSON API…).
 
-La version détectée est validée par `version_regex` (config) ; une sortie non
-conforme marque le paquet `BROKEN` (⚠️) — c'est la garde contre un CDN qui
-renverrait autre chose qu'une version.
+The detected version is validated by `version_regex` (config); any non-matching
+output marks the package `BROKEN` (⚠️) — this is the guard against a CDN that
+would return something other than a version.
 
 ## Installation
 
-### 1. Secrets Telegram
+### 1. Telegram secrets
 
 ```sh
 cp aur-updater/aur-updater.env.example ~/.config/aur-updater.env
-$EDITOR ~/.config/aur-updater.env   # remplir TG_BOT_TOKEN et TG_CHAT_ID
+$EDITOR ~/.config/aur-updater.env   # fill in TG_BOT_TOKEN and TG_CHAT_ID
 chmod 600 ~/.config/aur-updater.env
 ```
 
-Récupérer le chat id : envoyer un message au bot puis
+To retrieve the chat id: send a message to the bot, then
 `curl "https://api.telegram.org/bot<TOKEN>/getUpdates"`.
 
-### 2. SSH pour l'AUR
+### 2. SSH for the AUR
 
-Clé SSH configurée pour `aur@aur.archlinux.org` (voir le wiki AUR). Le remote
-SSH de chaque paquet est `aur_remote` dans `config.toml`.
+SSH key configured for `aur@aur.archlinux.org` (see the AUR wiki). The SSH
+remote of each package is `aur_remote` in `config.toml`.
 
-### 3. Dépendances Arch
+### 3. Arch dependencies
 
 ```sh
 pacman -S rust base-devel pacman-contrib git curl
-# rust          : compiler le binaire (edition 2024)
+# rust          : compile the binary (edition 2024)
 # base-devel    : makepkg (--printsrcinfo, -g)
-# pacman-contrib: updpkgsums (sinon fallback makepkg -g)
-# git, curl     : push AUR et envoi du digest Telegram
+# pacman-contrib: updpkgsums (otherwise fallback to makepkg -g)
+# git, curl     : AUR push and Telegram digest send
 ```
 
-### 4. Compiler le binaire
+### 4. Compile the binary
 
 ```sh
 cargo build --release --manifest-path aur-updater/Cargo.toml
-# produit aur-updater/target/release/aur-updater
+# produces aur-updater/target/release/aur-updater
 ```
 
-### 5. Installer le timer systemd (--user)
+### 5. Install the systemd timer (--user)
 
 ```sh
 mkdir -p ~/.config/systemd/user
@@ -91,44 +91,44 @@ systemctl --user daemon-reload
 systemctl --user enable --now aur-updater.timer
 ```
 
-Ajuster `WorkingDirectory` / `ExecStart` / `EnvironmentFile` dans le `.service`
-si le dépôt n'est pas à `~/work/github.com/Xefreh/pkgbuilds`.
+Adjust `WorkingDirectory` / `ExecStart` / `EnvironmentFile` in the `.service`
+if the repository is not located at `~/work/github.com/Xefreh/pkgbuilds`.
 
-## Utilisation
+## Usage
 
-À lancer depuis le dépôt : le binaire localise `aur-updater/config.toml` en
-remontant l'arborescence depuis le répertoire courant.
+Run from the repository: the binary locates `aur-updater/config.toml` by
+walking up the tree from the current directory.
 
 ```sh
 BIN=aur-updater/target/release/aur-updater
 
-# Test à blanc : détecte et affiche, ne pousse rien.
+# Dry run: detect and display, push nothing.
 "$BIN" --dry-run
 
-# Ne traiter qu'un paquet.
+# Process only one package.
 "$BIN" --only zcode-appimage
 
-# Exécution réelle (commit + push AUR + Telegram).
+# Real run (commit + AUR push + Telegram).
 "$BIN"
 
-# Logs systemd.
+# systemd logs.
 journalctl --user -u aur-updater.service
 ```
 
-## États notifiés (digest Telegram unique)
+## Notified states (single Telegram digest)
 
-| État        | Icône | Sens                                             |
-|-------------|-------|--------------------------------------------------|
-| UPDATED     | ✅    | pkgver bumpé, checksums régénérés, poussé AUR    |
-| UP_TO_DATE  | ⏸    | version détectée == pkgver courant               |
-| BROKEN      | ⚠️    | script de version en échec ou sortie non regex   |
-| FAILED      | ❌    | échec makepkg/updpkgsums/git push (rollback auto) |
-| WARN        | 🟡    | downgrade détecté (nouvelle version < courante)   |
+| State       | Icon | Meaning                                          |
+|-------------|------|--------------------------------------------------|
+| UPDATED     | ✅   | pkgver bumped, checksums regenerated, pushed AUR |
+| UP_TO_DATE  | ⏸   | detected version == current pkgver               |
+| BROKEN      | ⚠️   | version script failed or non-regex output        |
+| FAILED      | ❌   | makepkg/updpkgsums/git push failure (auto rollback) |
+| WARN        | 🟡   | downgrade detected (new version < current)       |
 
-## Limite connue
+## Known limitation
 
-Si un CDN renvoie `200` pour n'importe quelle version (faux positif), la
-garde regex ne le détecte pas. L'étape `updpkgsums` télécharge réellement
-l'asset ; un fichier absent/corrompu fait échouer l'étape (→ `FAILED`), ce qui
-protège en partie contre ce cas. Une sanity check optionnelle de l'asset
-(taille/magic) est prévue comme extension future.
+If a CDN returns `200` for any version (false positive), the regex guard does
+not detect it. The `updpkgsums` step actually downloads the asset; a missing or
+corrupted file causes the step to fail (→ `FAILED`), which partly protects
+against this case. An optional asset sanity check (size/magic) is planned as a
+future extension.
