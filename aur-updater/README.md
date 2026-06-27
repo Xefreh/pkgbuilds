@@ -5,22 +5,28 @@ paquet AUR, met à jour `PKGBUILD` + `.SRCINFO`, pousse sur l'AUR, et envoie un
 récapitulatif Telegram (mis à jour / déjà à jour / upstream cassé / échec).
 
 ## Stack
-- Python (stdlib) — orchestrateur et parsing PKGBUILD
+- Rust (edition 2024) — binaire `aur-updater` : orchestrateur et parsing PKGBUILD
 - Scripts bash par paquet pour la détection de version (ex: `fetch-version.sh`)
 - systemd timer — déclenchement quotidien à 20:00
 - TOML — manifeste de configuration
+
+Outils système requis à l'exécution : `git`, `makepkg` (base-devel), `curl`
+(envoi Telegram) et, de préférence, `updpkgsums` (pacman-contrib).
 
 ## Layout
 
 ```
 pkgbuilds/
 ├── aur-updater/
-│   ├── updater.py            # orchestrateur (CLI: --dry-run, --only <pkg>)
-│   ├── pkgbuild.py           # lecture/édition pkgver, pkgrel
-│   ├── notify.py             # notification Telegram (digest unique)
+│   ├── Cargo.toml            # manifeste Rust (edition 2024)
+│   ├── Cargo.lock
+│   ├── src/
+│   │   ├── main.rs           # orchestrateur (CLI: --dry-run, --only <pkg>)
+│   │   ├── pkgbuild.rs       # lecture/édition pkgver, pkgrel
+│   │   └── notify.rs         # notification Telegram (digest unique)
 │   ├── config.toml           # manifeste des paquets
 │   ├── aur-updater.service   # unit oneshot (User, EnvironmentFile)
-│   ├── aur-updater.timer      # OnCalendar 20:00
+│   ├── aur-updater.timer     # OnCalendar 20:00
 │   ├── aur-updater.env.example # template secrets Telegram
 │   └── README.md
 └── <pkg>/                    # chaque paquet (submodule)
@@ -61,10 +67,21 @@ SSH de chaque paquet est `aur_remote` dans `config.toml`.
 ### 3. Dépendances Arch
 
 ```sh
-pacman -S pacman-contrib   # fournit updpkgsums
+pacman -S rust base-devel pacman-contrib git curl
+# rust          : compiler le binaire (edition 2024)
+# base-devel    : makepkg (--printsrcinfo, -g)
+# pacman-contrib: updpkgsums (sinon fallback makepkg -g)
+# git, curl     : push AUR et envoi du digest Telegram
 ```
 
-### 4. Installer le timer systemd (--user)
+### 4. Compiler le binaire
+
+```sh
+cargo build --release --manifest-path aur-updater/Cargo.toml
+# produit aur-updater/target/release/aur-updater
+```
+
+### 5. Installer le timer systemd (--user)
 
 ```sh
 mkdir -p ~/.config/systemd/user
@@ -79,15 +96,20 @@ si le dépôt n'est pas à `~/work/github.com/Xefreh/pkgbuilds`.
 
 ## Utilisation
 
+À lancer depuis le dépôt : le binaire localise `aur-updater/config.toml` en
+remontant l'arborescence depuis le répertoire courant.
+
 ```sh
+BIN=aur-updater/target/release/aur-updater
+
 # Test à blanc : détecte et affiche, ne pousse rien.
-python aur-updater/updater.py --dry-run
+"$BIN" --dry-run
 
 # Ne traiter qu'un paquet.
-python aur-updater/updater.py --only zcode-appimage
+"$BIN" --only zcode-appimage
 
 # Exécution réelle (commit + push AUR + Telegram).
-python aur-updater/updater.py
+"$BIN"
 
 # Logs systemd.
 journalctl --user -u aur-updater.service

@@ -1,0 +1,20 @@
+[package]
+name = "aur-updater"
+version = "1.0.0"
+edition = "2024"
+description = "AUR updater: detect upstream versions, bump pkgver/pkgrel + checksums, push to AUR, Telegram digest."
+publish = false
+
+[[bin]]
+name = "aur-updater"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+toml = "1.1.2"
+indexmap = { version = "2.14.0", features = ["serde"] }
+regex = "1.12.4"
+
+[profile.release]
+lto = true
+strip = true
