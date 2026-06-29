@@ -320,7 +320,7 @@ fn regenerate_srcinfo(path: &Path) -> Result<()> {
 
 fn commit_and_push(pkg: &Pkg, new_ver: &str) -> Result<()> {
     let msg = format!("upgpkg: {} {new_ver}-1", pkg.name);
-    run(&["git", "add", "-A"], &pkg.path)?;
+    run(&["git", "add", "PKGBUILD", ".SRCINFO"], &pkg.path)?;
     run(&["git", "commit", "-m", msg.as_str()], &pkg.path)?;
     run(
         &["git", "push", pkg.aur_remote.as_str(), "HEAD:master"],
