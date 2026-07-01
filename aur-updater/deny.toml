@@ -1,0 +1,42 @@
+# cargo-deny configuration.
+#
+# This is a private, non-published binary (publish = false) with no declared
+# license, so the local crate is exempted from the license check below; the
+# check still validates every dependency.
+
+[graph]
+all-features = true
+
+# advisories: warn on known vulnerable crates (RUSTSEC).
+[advisories]
+version = 2
+# Don't fail the build on yanked crates — warn only. CI/nightly runs can bump
+# this to deny once the lockfile is refreshed.
+yanked = "warn"
+ignore = []
+
+# licenses: allow only the licenses actually present in the dependency tree.
+# The local crate (aur-updater) is intentionally unlicensed and exempted below.
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+]
+confidence-threshold = 0.8
+# The local crate is private/unpublished (publish = false) and deliberately
+# carries no license — don't flag it.
+private = { ignore = true }
+
+# bans: flag duplicate crate versions (potential bloat / conflict).
+[bans]
+multiple-versions = "warn"
+wildcards = "warn"
+
+# sources: only allow crates.io.
+[sources]
+unknown-registry = "warn"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

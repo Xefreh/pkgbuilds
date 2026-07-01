@@ -179,9 +179,15 @@ fn resolve_packages(cfg: &Config, repo_root: &Path) -> Vec<Pkg> {
 
 /// Run a command, returning an error with context on failure.
 fn run(cmd: &[&str], cwd: &Path) -> Result<std::process::Output> {
+    run_with_env(cmd, cwd, &[])
+}
+
+/// Like `run`, but additionally sets `envs` (name, value) pairs in the child.
+fn run_with_env(cmd: &[&str], cwd: &Path, envs: &[(&str, &str)]) -> Result<std::process::Output> {
     let out = Command::new(cmd[0])
         .args(&cmd[1..])
         .current_dir(cwd)
+        .envs(envs.iter().copied())
         .output()
         .map_err(|e| format!("{}: {e}", cmd.join(" ")))?;
     if !out.status.success() {
@@ -290,25 +296,57 @@ fn git_reset(path: &Path) {
         .output();
 }
 
-/// Refresh sha256sums via updpkgsums (pacman-contrib), fall back to makepkg -g.
+/// Refresh sha256sums. Single-arch packages delegate to `updpkgsums` (pacman-contrib)
+/// with a `makepkg -g` fallback. Multi-arch packages (e.g. `x86_64` + `aarch64`)
+/// need per-arch sums: `updpkgsums` can't produce those on a single host, so we run
+/// `makepkg -g` once per arch with `CARCH` overridden and splice each result into its
+/// `sha256sums_<arch>` line.
 fn update_checksums(path: &Path) -> Result<()> {
-    if which("updpkgsums") {
-        run(&["updpkgsums"], path)?;
+    let arches = pkgbuild::read_arches(&path.join("PKGBUILD"))?;
+
+    // Single-arch (or no arch= at all): use the fast path.
+    if arches.len() <= 1 {
+        if which("updpkgsums") {
+            run(&["updpkgsums"], path)?;
+            return Ok(());
+        }
+        let out = run(&["makepkg", "-g"], path)?;
+        let sums = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if sums.is_empty() {
+            return Err("makepkg -g produced no checksums".into());
+        }
+        let pkgbuild = path.join("PKGBUILD");
+        let text = fs::read_to_string(&pkgbuild)?;
+        let updated = pkgbuild::splice_sums_block(&text, &sums, "sha256sums")?;
+        fs::write(&pkgbuild, updated)?;
         return Ok(());
     }
-    // Fallback: regenerate the checksums block manually.
-    let out = run(&["makepkg", "-g"], path)?;
-    let raw = String::from_utf8_lossy(&out.stdout);
-    let sums = raw.trim();
-    if sums.is_empty() {
-        return Err("makepkg -g produced no checksums".into());
-    }
+
+    // Multi-arch: compute one checksums block per arch, splice each into its own line.
     let pkgbuild = path.join("PKGBUILD");
-    let text = fs::read_to_string(&pkgbuild)?;
-    let re = Regex::new(r"(?ms)^sha256sums=.*?\)\s*$").unwrap();
-    let updated = re.replacen(&text, 1, NoExpand(sums));
-    fs::write(&pkgbuild, updated.as_ref())?;
+    let mut text = fs::read_to_string(&pkgbuild)?;
+    for arch in &arches {
+        let out = run_with_env(&["makepkg", "-g"], path, &[("CARCH", arch.as_str())])?;
+        let sums = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if sums.is_empty() {
+            return Err(format!("makepkg -g (CARCH={arch}) produced no checksums").into());
+        }
+        let target = format!("sha256sums_{arch}");
+        text = pkgbuild::splice_sums_block(&text, &sums, &target)?;
+    }
+    // Drop any now-stale single-arch `sha256sums=(...)` line so makepkg doesn't
+    // error out on conflicting generic + per-arch sums.
+    text = strip_generic_sums_line(&text)?;
+    fs::write(&pkgbuild, text)?;
     Ok(())
+}
+
+/// Remove a generic `sha256sums=(...)` line when per-arch sums are present.
+/// Harmless if there's nothing to remove. `[\s\S]*?` matches across newlines so
+/// a multi-line block is stripped too.
+fn strip_generic_sums_line(text: &str) -> Result<String> {
+    let re = regex::Regex::new(r"(?m)^sha256sums=\([\s\S]*?\)\n?")?;
+    Ok(re.replace(text, NoExpand("")).into_owned())
 }
 
 /// Regenerate .SRCINFO from the current PKGBUILD.
@@ -473,5 +511,76 @@ mod tests {
         let digits = Regex::new(r"\d+").unwrap();
         assert!(matches_at_start(&digits, "12ab"));
         assert!(!matches_at_start(&digits, "ab12"));
+    }
+
+    /// Direct test of `run_with_env`: the extra env vars (here `CARCH`) must
+    /// actually reach the child process — that's the one thing `run_with_env`
+    /// adds over `run`, and what `update_checksums` relies on to compute a
+    /// per-arch checksums block. The fake makepkg is invoked by absolute path,
+    /// so there is no PATH lookup, no global env mutation, and no `unsafe`.
+    #[test]
+    fn run_with_env_propagates_env_to_child() {
+        use std::io::Write;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+
+        // Fake makepkg: with -g, print a sums line tagged with the CARCH received.
+        let bin = dir.join("makepkg");
+        let script = "#!/bin/sh\n\
+            for a in \"$@\"; do [ \"$a\" = \"-g\" ] && {\n\
+                printf \"sha256sums=('hash-%s')\\n\" \"${CARCH:-unset}\";\n\
+                exit 0;\n\
+            }; done\n";
+        let mut f = fs::File::create(&bin).unwrap();
+        f.write_all(script.as_bytes()).unwrap();
+        drop(f);
+        make_executable(&bin);
+        let makepkg = bin.to_str().unwrap();
+
+        // CARCH override must reach the child.
+        let out = run_with_env(&[makepkg, "-g"], dir, &[("CARCH", "aarch64")]).unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains("sha256sums=('hash-aarch64')"),
+            "CARCH not propagated to child: {stdout}"
+        );
+
+        // Without the override the child sees no CARCH (a real makepkg only sets it
+        // during a build), confirming we don't leak an unrelated value.
+        let out = run_with_env(&[makepkg, "-g"], dir, &[]).unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains("sha256sums=('hash-unset')"),
+            "unexpected CARCH leak: {stdout}"
+        );
+    }
+
+    #[test]
+    fn strip_generic_sums_line_removes_single_line() {
+        let text = "pkgname=x\nsha256sums=('abc')\nsha256sums_x86_64=('def')\n";
+        let out = strip_generic_sums_line(text).unwrap();
+        assert!(!out.contains("sha256sums="));
+        assert!(out.contains("sha256sums_x86_64=('def')"));
+    }
+
+    #[test]
+    fn strip_generic_sums_line_removes_multi_line_block() {
+        let text = "pkgname=x\nsha256sums=(\n    'abc'\n    'ghi'\n)\nsha256sums_aarch64=('def')\n";
+        let out = strip_generic_sums_line(text).unwrap();
+        assert!(
+            !out.contains("sha256sums="),
+            "generic line should be gone: {out}"
+        );
+        assert!(!out.contains("'abc'"));
+        assert!(out.contains("sha256sums_aarch64=('def')"));
+    }
+
+    #[cfg(unix)]
+    fn make_executable(p: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perm = fs::metadata(p).unwrap().permissions();
+        perm.set_mode(0o755);
+        fs::set_permissions(p, perm).unwrap();
     }
 }
