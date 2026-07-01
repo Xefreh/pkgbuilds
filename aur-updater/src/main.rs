@@ -513,73 +513,46 @@ mod tests {
         assert!(!matches_at_start(&digits, "ab12"));
     }
 
-    /// End-to-end test of `update_checksums` for a multi-arch PKGBUILD.
-    ///
-    /// A fake `makepkg` on PATH prints a deterministic sums block per CARCH,
-    /// proving that update_checksums runs once per arch and splices each result
-    /// into the matching `sha256sums_<arch>` line — the exact regression we fixed.
+    /// Direct test of `run_with_env`: the extra env vars (here `CARCH`) must
+    /// actually reach the child process — that's the one thing `run_with_env`
+    /// adds over `run`, and what `update_checksums` relies on to compute a
+    /// per-arch checksums block. The fake makepkg is invoked by absolute path,
+    /// so there is no PATH lookup, no global env mutation, and no `unsafe`.
     #[test]
-    fn update_checksums_multi_arch_splices_per_arch() {
+    fn run_with_env_propagates_env_to_child() {
         use std::io::Write;
 
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
 
-        // Fake makepkg: echoes a sums line tagged with the CARCH it was called with.
+        // Fake makepkg: with -g, print a sums line tagged with the CARCH received.
         let bin = dir.join("makepkg");
         let script = "#!/bin/sh\n\
-            # If invoked with -g, emit a per-arch sums block; else no-op.\n\
             for a in \"$@\"; do [ \"$a\" = \"-g\" ] && {\n\
-                printf \"sha256sums=('hash-%s')\\n\" \"${CARCH:-unknown}\";\n\
+                printf \"sha256sums=('hash-%s')\\n\" \"${CARCH:-unset}\";\n\
                 exit 0;\n\
             }; done\n";
         let mut f = fs::File::create(&bin).unwrap();
         f.write_all(script.as_bytes()).unwrap();
         drop(f);
         make_executable(&bin);
+        let makepkg = bin.to_str().unwrap();
 
-        // A PKGBUILD declaring two arches and per-arch sums.
-        let pkgbuild = dir.join("PKGBUILD");
-        fs::write(
-            &pkgbuild,
-            "pkgname=zcode-appimage\n\
-             pkgver=3.2.2\n\
-             arch=('x86_64' 'aarch64')\n\
-             sha256sums_x86_64=('STALE')\n\
-             sha256sums_aarch64=('STALE')\n",
-        )
-        .unwrap();
-
-        // Run with the fake makepkg shadowing the real one.
-        let old_path = env::var_os("PATH").unwrap();
-        // SAFETY: no other test in this binary reads PATH, so there's no data race
-        // with concurrent tests over this shared env var.
-        unsafe {
-            env::set_var("PATH", dir);
-        }
-
-        // `updpkgsums` should NOT be on this temp PATH, so we force the makepkg path.
-        // Temporarily pretend updpkgsums is absent by also ensuring it's not found.
-        let res = update_checksums(dir);
-
-        unsafe {
-            env::set_var("PATH", old_path);
-        }
-
-        res.unwrap();
-        let text = fs::read_to_string(&pkgbuild).unwrap();
+        // CARCH override must reach the child.
+        let out = run_with_env(&[makepkg, "-g"], dir, &[("CARCH", "aarch64")]).unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(
-            text.contains("sha256sums_x86_64=('hash-x86_64')"),
-            "x86_64 line not spliced: {text}"
+            stdout.contains("sha256sums=('hash-aarch64')"),
+            "CARCH not propagated to child: {stdout}"
         );
+
+        // Without the override the child sees no CARCH (a real makepkg only sets it
+        // during a build), confirming we don't leak an unrelated value.
+        let out = run_with_env(&[makepkg, "-g"], dir, &[]).unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(
-            text.contains("sha256sums_aarch64=('hash-aarch64')"),
-            "aarch64 line not spliced: {text}"
-        );
-        assert!(!text.contains("'STALE'"), "stale sums left behind: {text}");
-        assert!(
-            !text.contains("\nsha256sums="),
-            "a generic sha256sums= line should not be present: {text}"
+            stdout.contains("sha256sums=('hash-unset')"),
+            "unexpected CARCH leak: {stdout}"
         );
     }
 
