@@ -342,9 +342,10 @@ fn update_checksums(path: &Path) -> Result<()> {
 }
 
 /// Remove a generic `sha256sums=(...)` line when per-arch sums are present.
-/// Harmless if there's nothing to remove.
+/// Harmless if there's nothing to remove. `[\s\S]*?` matches across newlines so
+/// a multi-line block is stripped too.
 fn strip_generic_sums_line(text: &str) -> Result<String> {
-    let re = regex::Regex::new(r"(?m)^sha256sums=\(.*\)\n?")?;
+    let re = regex::Regex::new(r"(?m)^sha256sums=\([\s\S]*?\)\n?")?;
     Ok(re.replace(text, NoExpand("")).into_owned())
 }
 
@@ -580,6 +581,26 @@ mod tests {
             !text.contains("\nsha256sums="),
             "a generic sha256sums= line should not be present: {text}"
         );
+    }
+
+    #[test]
+    fn strip_generic_sums_line_removes_single_line() {
+        let text = "pkgname=x\nsha256sums=('abc')\nsha256sums_x86_64=('def')\n";
+        let out = strip_generic_sums_line(text).unwrap();
+        assert!(!out.contains("sha256sums="));
+        assert!(out.contains("sha256sums_x86_64=('def')"));
+    }
+
+    #[test]
+    fn strip_generic_sums_line_removes_multi_line_block() {
+        let text = "pkgname=x\nsha256sums=(\n    'abc'\n    'ghi'\n)\nsha256sums_aarch64=('def')\n";
+        let out = strip_generic_sums_line(text).unwrap();
+        assert!(
+            !out.contains("sha256sums="),
+            "generic line should be gone: {out}"
+        );
+        assert!(!out.contains("'abc'"));
+        assert!(out.contains("sha256sums_aarch64=('def')"));
     }
 
     #[cfg(unix)]
