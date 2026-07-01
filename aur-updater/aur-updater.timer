@@ -1,11 +1,11 @@
 [Unit]
-Description=Daily 20:00 AUR auto-updater run
+Description=Daily 18:00 AUR auto-updater run
 Documentation=file://%h/work/github.com/Xefreh/pkgbuilds/aur-updater/README.md
 
 [Timer]
-# Every day at 20:00. Persistent=true catches up a run missed while the machine
+# Every day at 18:00. Persistent=true catches up a run missed while the machine
 # was asleep/off (it runs at next boot).
-OnCalendar=*-*-* 20:00:00
+OnCalendar=*-*-* 18:00:00
 Persistent=true
 
 [Install]
